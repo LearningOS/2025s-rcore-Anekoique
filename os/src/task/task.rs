@@ -2,9 +2,8 @@
 use super::TaskContext;
 use super::{kstack_alloc, pid_alloc, KernelStack, PidHandle};
 use crate::config::TRAP_CONTEXT_BASE;
-use crate::mm::{MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE};
+use crate::mm::{MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE, VirtPageNum, MapPermission};
 use crate::sync::UPSafeCell;
-
 use crate::trap::{trap_handler, TrapContext};
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
@@ -69,9 +68,6 @@ pub struct TaskControlBlockInner {
 
     /// Program break
     pub program_brk: usize,
-
-    /// task syscall trace
-    pub task_trace: [usize; MAX_SYSCALL_NUM],
 }
 
 impl TaskControlBlockInner {
@@ -239,6 +235,27 @@ impl TaskControlBlock {
         } else {
             None
         }
+    }
+    /// add a new Map_Area
+    pub fn push_maparea(&self, start_va: usize, end_va: usize, prot: usize) -> bool {
+        let mut inner = self.inner.exclusive_access();
+        let start_vpn = VirtPageNum::from(VirtAddr::from(start_va));
+        let end_vpn = VirtPageNum::from(VirtAddr::from(end_va));
+        let memory_set = &mut inner.memory_set;
+        if !memory_set.check_range(start_vpn, end_vpn) { return false; }
+        memory_set.insert_framed_area(start_va.into(), end_va.into(), MapPermission::U | MapPermission::from_bits_truncate(prot as u8));
+        true
+    }
+
+    /// unmap an area 
+    pub fn unmap_area(&self, start_va: usize, end_va: usize) -> bool {
+        let mut inner = self.inner.exclusive_access();
+        let start_vpn = VirtPageNum::from(VirtAddr::from(start_va));
+        let end_vpn = VirtPageNum::from(VirtAddr::from(end_va));
+        let memory_set = &mut inner.memory_set;
+        if !memory_set.check_area(start_vpn, end_vpn) { return false; }
+        memory_set.unmap_area(start_vpn);
+        true
     }
 }
 
